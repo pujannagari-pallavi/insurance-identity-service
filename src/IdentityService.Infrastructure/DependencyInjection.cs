@@ -33,6 +33,7 @@ public static class DependencyInjection
         services.AddScoped<IValidator<RefreshTokenRequest>, RefreshTokenRequestValidator>();
         services.AddScoped<AuthResponseFactory>();
         services.AddScoped<IDefaultRoleAssigner, DefaultRoleAssigner>();
+        services.AddScoped<BootstrapAdminService>();
         services.AddScoped<IRegistrationService, RegistrationService>();
         services.AddScoped<ILoginService, LoginService>();
         services.AddScoped<IRefreshTokenService, RefreshTokenService>();

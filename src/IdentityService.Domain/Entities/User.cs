@@ -48,6 +48,15 @@ public sealed class User
         _roles.Add(role);
     }
 
+    public void ReplaceRoles(IEnumerable<Role> roles)
+    {
+        _roles.Clear();
+        foreach (var role in roles)
+        {
+            AssignRole(role);
+        }
+    }
+
     public void AddRefreshToken(RefreshToken refreshToken)
     {
         _refreshTokens.Add(refreshToken);

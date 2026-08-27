@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using IdentityService.API.Infrastructure;
+using IdentityService.Application.Services;
 using IdentityService.Infrastructure;
 using IdentityService.Infrastructure.Authentication;
 using IdentityService.Infrastructure.Persistence;
@@ -75,6 +76,33 @@ var app = builder.Build();
 if (!app.Environment.IsEnvironment("Testing"))
 {
     await app.ApplyMigrationsAsync();
+
+    var bootstrapAdmin = app.Configuration.GetSection("BootstrapAdmin");
+    var bootstrapEmail = bootstrapAdmin["Email"];
+    var bootstrapUserName = bootstrapAdmin["UserName"];
+    var bootstrapPassword = bootstrapAdmin["Password"];
+    var bootstrapValues = new[] { bootstrapEmail, bootstrapUserName, bootstrapPassword };
+
+    if (bootstrapValues.Any(value => !string.IsNullOrWhiteSpace(value)))
+    {
+        if (bootstrapValues.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new InvalidOperationException(
+                "BootstrapAdmin requires Email, UserName, and Password when it is configured.");
+        }
+
+        using var scope = app.Services.CreateScope();
+        var bootstrapService = scope.ServiceProvider.GetRequiredService<BootstrapAdminService>();
+        var wasCreated = await bootstrapService.EnsureCreatedAsync(
+            bootstrapEmail!,
+            bootstrapUserName!,
+            bootstrapPassword!);
+
+        if (wasCreated)
+        {
+            app.Logger.LogInformation("Created the configured bootstrap PlatformAdmin user.");
+        }
+    }
 }
 
 if (app.Environment.IsDevelopment() || app.Configuration.GetValue<bool>("Swagger:Enabled"))
