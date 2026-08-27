@@ -110,6 +110,21 @@ public sealed class AdministrationController(IdentityDbContext dbContext) : Cont
         return NoContent();
     }
 
+    [HttpDelete("users/{userId:guid}")]
+    public async Task<IActionResult> DeleteUser(Guid userId, CancellationToken cancellationToken)
+    {
+        RequireUserManagement();
+        if (userId == ActorId()) return BadRequest(new { detail = "You cannot delete your own account." });
+
+        var user = await dbContext.Users.SingleOrDefaultAsync(item => item.Id == userId, cancellationToken);
+        if (user is null) return NotFound();
+
+        dbContext.AdministrationAuditEntries.Add(new AdministrationAuditEntry(ActorId(), userId, "UserDeleted", user.Email));
+        dbContext.Users.Remove(user);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return NoContent();
+    }
+
     [HttpGet("audit")]
     public async Task<IActionResult> GetAudit(CancellationToken cancellationToken)
     {
