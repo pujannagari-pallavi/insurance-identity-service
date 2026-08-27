@@ -41,6 +41,8 @@ public sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> option
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
+    public DbSet<AdministrationAuditEntry> AdministrationAuditEntries => Set<AdministrationAuditEntry>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -49,6 +51,7 @@ public sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> option
         ConfigureRole(modelBuilder);
         ConfigurePermission(modelBuilder);
         ConfigureRefreshToken(modelBuilder);
+        ConfigureAdministrationAuditEntry(modelBuilder);
         SeedIdentityData(modelBuilder);
     }
 
@@ -134,6 +137,18 @@ public sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> option
         builder.Property(token => token.CreatedAtUtc).IsRequired();
         builder.Property(token => token.ExpiresAtUtc).IsRequired();
         builder.HasIndex(token => token.Token).IsUnique();
+    }
+
+    private static void ConfigureAdministrationAuditEntry(ModelBuilder modelBuilder)
+    {
+        var builder = modelBuilder.Entity<AdministrationAuditEntry>();
+        builder.ToTable("AdministrationAuditEntries");
+        builder.HasKey(entry => entry.Id);
+        builder.Property(entry => entry.Action).HasMaxLength(100).IsRequired();
+        builder.Property(entry => entry.Details).HasMaxLength(2000).IsRequired();
+        builder.Property(entry => entry.OccurredAtUtc).IsRequired();
+        builder.HasIndex(entry => entry.TargetUserId);
+        builder.HasIndex(entry => entry.OccurredAtUtc);
     }
 
     private static void SeedIdentityData(ModelBuilder modelBuilder)

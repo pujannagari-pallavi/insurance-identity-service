@@ -21,7 +21,7 @@ public sealed class LoginService(
         var user = await userRepository.GetByEmailAsync(request.Email, cancellationToken)
             ?? throw new AuthenticationException("Invalid credentials.");
 
-        if (!passwordHasher.Verify(request.Password, user.PasswordHash))
+        if (!user.IsActive || !passwordHasher.Verify(request.Password, user.PasswordHash))
         {
             throw new AuthenticationException("Invalid credentials.");
         }

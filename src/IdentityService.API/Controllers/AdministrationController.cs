@@ -1,8 +1,10 @@
 using IdentityService.Domain.Entities;
+using IdentityService.Application.Services;
 using IdentityService.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace IdentityService.API.Controllers;
 
@@ -68,9 +70,53 @@ public sealed class AdministrationController(IdentityDbContext dbContext) : Cont
         var roles = await dbContext.Roles.Where(role => roleIds.Contains(role.Id)).ToListAsync(cancellationToken);
         if (roles.Count != roleIds.Length) return BadRequest(new { detail = "One or more role IDs do not exist." });
 
+        var removesPlatformAdmin = user.Roles.Any(role => role.Name == DefaultRoles.PlatformAdmin)
+            && roles.All(role => role.Name != DefaultRoles.PlatformAdmin);
+        if (removesPlatformAdmin && await dbContext.Users.CountAsync(item => item.Roles.Any(role => role.Name == DefaultRoles.PlatformAdmin), cancellationToken) <= 1)
+        {
+            return BadRequest(new { detail = "The last PlatformAdmin role cannot be removed." });
+        }
+
         user.ReplaceRoles(roles);
+        dbContext.AdministrationAuditEntries.Add(new AdministrationAuditEntry(ActorId(), userId, "RolesUpdated", string.Join(",", roles.Select(role => role.Name))));
         await dbContext.SaveChangesAsync(cancellationToken);
         return NoContent();
+    }
+
+    [HttpPut("users/{userId:guid}/status")]
+    public async Task<IActionResult> UpdateStatus(Guid userId, UpdateUserStatusRequest request, CancellationToken cancellationToken)
+    {
+        RequireUserManagement();
+        var user = await dbContext.Users.Include(item => item.RefreshTokens).SingleOrDefaultAsync(item => item.Id == userId, cancellationToken);
+        if (user is null) return NotFound();
+        if (userId == ActorId() && !request.IsActive) return BadRequest(new { detail = "You cannot deactivate your own account." });
+
+        user.SetActive(request.IsActive);
+        if (!request.IsActive) user.RevokeRefreshTokens(DateTime.UtcNow);
+        dbContext.AdministrationAuditEntries.Add(new AdministrationAuditEntry(ActorId(), userId, request.IsActive ? "UserActivated" : "UserDeactivated", user.Email));
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return NoContent();
+    }
+
+    [HttpPost("users/{userId:guid}/revoke-sessions")]
+    public async Task<IActionResult> RevokeSessions(Guid userId, CancellationToken cancellationToken)
+    {
+        RequireUserManagement();
+        var user = await dbContext.Users.Include(item => item.RefreshTokens).SingleOrDefaultAsync(item => item.Id == userId, cancellationToken);
+        if (user is null) return NotFound();
+        user.RevokeRefreshTokens(DateTime.UtcNow);
+        dbContext.AdministrationAuditEntries.Add(new AdministrationAuditEntry(ActorId(), userId, "SessionsRevoked", user.Email));
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return NoContent();
+    }
+
+    [HttpGet("audit")]
+    public async Task<IActionResult> GetAudit(CancellationToken cancellationToken)
+    {
+        RequireUserManagement();
+        var entries = await dbContext.AdministrationAuditEntries.AsNoTracking().OrderByDescending(entry => entry.OccurredAtUtc).Take(100)
+            .Select(entry => new { entry.Id, entry.ActorUserId, entry.TargetUserId, entry.Action, entry.Details, entry.OccurredAtUtc }).ToListAsync(cancellationToken);
+        return Ok(entries);
     }
 
     private void RequireUserManagement()
@@ -80,7 +126,11 @@ public sealed class AdministrationController(IdentityDbContext dbContext) : Cont
             throw new UnauthorizedAccessException("You do not have permission to manage users.");
         }
     }
+
+    private Guid ActorId() => Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)
+        ? userId : throw new UnauthorizedAccessException("The access token does not contain a valid user identifier.");
 }
 
 public sealed record UpdateUserRolesRequest(IReadOnlyCollection<Guid> RoleIds);
+public sealed record UpdateUserStatusRequest(bool IsActive);
 

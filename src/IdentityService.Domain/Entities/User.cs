@@ -57,6 +57,19 @@ public sealed class User
         }
     }
 
+    public void SetActive(bool isActive)
+    {
+        IsActive = isActive;
+    }
+
+    public void RevokeRefreshTokens(DateTime revokedAtUtc)
+    {
+        foreach (var refreshToken in _refreshTokens.Where(token => token.IsActive(revokedAtUtc)))
+        {
+            refreshToken.Revoke(revokedAtUtc);
+        }
+    }
+
     public void AddRefreshToken(RefreshToken refreshToken)
     {
         _refreshTokens.Add(refreshToken);
