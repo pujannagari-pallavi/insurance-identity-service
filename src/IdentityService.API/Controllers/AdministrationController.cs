@@ -12,15 +12,38 @@ namespace IdentityService.API.Controllers;
 public sealed class AdministrationController(IdentityDbContext dbContext) : ControllerBase
 {
     [HttpGet("users")]
-    public async Task<IActionResult> GetUsers(CancellationToken cancellationToken)
+    public async Task<IActionResult> GetUsers(
+        [FromQuery] string? search,
+        [FromQuery] string? role,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 25,
+        CancellationToken cancellationToken = default)
     {
         RequireUserManagement();
-        var users = await dbContext.Users
-            .Include(user => user.Roles)
-            .OrderBy(user => user.Email)
+        page = Math.Max(page, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+
+        var usersQuery = dbContext.Users.AsNoTracking().AsQueryable();
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var searchTerm = search.Trim().ToLower();
+            usersQuery = usersQuery.Where(user =>
+                user.Email.ToLower().Contains(searchTerm) || user.UserName.ToLower().Contains(searchTerm));
+        }
+
+        if (!string.IsNullOrWhiteSpace(role))
+        {
+            var roleName = role.Trim();
+            usersQuery = usersQuery.Where(user => user.Roles.Any(item => item.Name == roleName));
+        }
+
+        var totalCount = await usersQuery.CountAsync(cancellationToken);
+        var users = await usersQuery.OrderBy(user => user.Email)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(user => new { user.Id, user.Email, user.UserName, user.IsActive, Roles = user.Roles.Select(role => role.Name) })
             .ToListAsync(cancellationToken);
-        return Ok(users);
+        return Ok(new { items = users, totalCount, page, pageSize });
     }
 
     [HttpGet("roles")]
@@ -60,3 +83,4 @@ public sealed class AdministrationController(IdentityDbContext dbContext) : Cont
 }
 
 public sealed record UpdateUserRolesRequest(IReadOnlyCollection<Guid> RoleIds);
+
