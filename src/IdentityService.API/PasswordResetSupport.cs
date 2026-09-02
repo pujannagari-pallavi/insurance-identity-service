@@ -29,10 +29,21 @@ public sealed class PasswordResetEmailService(IConfiguration configuration, ILog
         using var client = new SmtpClient(host, int.TryParse(configuration["SMTP_PORT"], out var port) ? port : 587)
         {
             EnableSsl = true,
+            Timeout = 20_000,
             Credentials = new NetworkCredential(configuration["SMTP_USERNAME"], configuration["SMTP_PASSWORD"])
         };
         using var message = new MailMessage(configuration["SMTP_FROM_ADDRESS"] ?? configuration["SMTP_USERNAME"]!, email, subject, body) { IsBodyHtml = true };
-        await client.SendMailAsync(message, cancellationToken);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        try
+        {
+            await client.SendMailAsync(message, timeout.Token);
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Failed to send password email to {Email} through SMTP host {Host}.", email, host);
+            throw new InvalidOperationException("The password email could not be sent. Check the Identity Service SMTP configuration.", exception);
+        }
     }
 }
 
