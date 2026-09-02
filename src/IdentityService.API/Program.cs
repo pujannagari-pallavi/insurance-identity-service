@@ -49,6 +49,7 @@ builder.Services.AddSwaggerGen(options =>
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<IdentityExceptionHandler>();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddHttpClient("resend", client => client.BaseAddress = new Uri("https://api.resend.com/"));
 builder.Services.AddScoped<IPasswordResetEmailService, PasswordResetEmailService>();
 
 var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>()
