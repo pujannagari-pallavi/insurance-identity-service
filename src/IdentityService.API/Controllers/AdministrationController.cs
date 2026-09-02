@@ -1,4 +1,5 @@
 using IdentityService.Domain.Entities;
+using IdentityService.Application.Abstractions.Authentication;
 using IdentityService.Application.Services;
 using IdentityService.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
@@ -11,8 +12,49 @@ namespace IdentityService.API.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/administration")]
-public sealed class AdministrationController(IdentityDbContext dbContext) : ControllerBase
+public sealed class AdministrationController(IdentityDbContext dbContext, IPasswordHasher passwordHasher) : ControllerBase
 {
+    [HttpPost("users")]
+    public async Task<IActionResult> CreateUser(CreateOperationalUserRequest request, CancellationToken cancellationToken)
+    {
+        RequireUserManagement();
+        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.UserName) || string.IsNullOrWhiteSpace(request.Password))
+        {
+            return BadRequest(new { detail = "Email, username, and password are required." });
+        }
+
+        if (request.Password.Length < 8)
+        {
+            return BadRequest(new { detail = "Password must be at least 8 characters." });
+        }
+
+        if (await dbContext.Users.AnyAsync(user => user.Email == request.Email.Trim(), cancellationToken))
+        {
+            return BadRequest(new { detail = "A user with this email already exists." });
+        }
+
+        var roleIds = request.RoleIds.Distinct().ToArray();
+        var roles = await dbContext.Roles.Where(role => roleIds.Contains(role.Id)).ToListAsync(cancellationToken);
+        if (roles.Count != roleIds.Length || roles.Count == 0)
+        {
+            return BadRequest(new { detail = "Assign at least one valid operational role." });
+        }
+
+        if (roles.Any(role => role.Name == DefaultRoles.Customer))
+        {
+            return BadRequest(new { detail = "Customer accounts must be created through customer registration." });
+        }
+
+        var user = new User(Guid.NewGuid(), request.Email.Trim(), request.UserName.Trim());
+        user.SetPasswordHash(passwordHasher.Hash(request.Password));
+        user.ReplaceRoles(roles);
+        dbContext.Users.Add(user);
+        dbContext.AdministrationAuditEntries.Add(new AdministrationAuditEntry(ActorId(), user.Id, "OperationalUserCreated", string.Join(",", roles.Select(role => role.Name))));
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new { user.Id, user.Email, user.UserName, user.IsActive, Roles = user.Roles.Select(role => role.Name) });
+    }
+
     [HttpGet("users")]
     public async Task<IActionResult> GetUsers(
         [FromQuery] string? search,
@@ -148,4 +190,5 @@ public sealed class AdministrationController(IdentityDbContext dbContext) : Cont
 
 public sealed record UpdateUserRolesRequest(IReadOnlyCollection<Guid> RoleIds);
 public sealed record UpdateUserStatusRequest(bool IsActive);
+public sealed record CreateOperationalUserRequest(string Email, string UserName, string Password, IReadOnlyCollection<Guid> RoleIds);
 
