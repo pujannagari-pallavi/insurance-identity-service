@@ -6,26 +6,23 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace IdentityService.API.Controllers;
 
 [ApiController]
 [Authorize]
 [Route("api/administration")]
-public sealed class AdministrationController(IdentityDbContext dbContext, IPasswordHasher passwordHasher) : ControllerBase
+public sealed class AdministrationController(IdentityDbContext dbContext, IPasswordResetEmailService passwordResetEmailService) : ControllerBase
 {
     [HttpPost("users")]
     public async Task<IActionResult> CreateUser(CreateOperationalUserRequest request, CancellationToken cancellationToken)
     {
         RequireUserManagement();
-        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.UserName) || string.IsNullOrWhiteSpace(request.Password))
+        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.UserName))
         {
-            return BadRequest(new { detail = "Email, username, and password are required." });
-        }
-
-        if (request.Password.Length < 8)
-        {
-            return BadRequest(new { detail = "Password must be at least 8 characters." });
+            return BadRequest(new { detail = "Email and username are required." });
         }
 
         if (await dbContext.Users.AnyAsync(user => user.Email == request.Email.Trim(), cancellationToken))
@@ -46,11 +43,13 @@ public sealed class AdministrationController(IdentityDbContext dbContext, IPassw
         }
 
         var user = new User(Guid.NewGuid(), request.Email.Trim(), request.UserName.Trim());
-        user.SetPasswordHash(passwordHasher.Hash(request.Password));
         user.ReplaceRoles(roles);
         dbContext.Users.Add(user);
+        var resetToken = PasswordResetTokenFactory.Create(user.Id);
+        dbContext.PasswordResetTokens.Add(resetToken.Token);
         dbContext.AdministrationAuditEntries.Add(new AdministrationAuditEntry(ActorId(), user.Id, "OperationalUserCreated", string.Join(",", roles.Select(role => role.Name))));
         await dbContext.SaveChangesAsync(cancellationToken);
+        await passwordResetEmailService.SendAsync(user.Email, user.UserName, resetToken.RawToken, true, cancellationToken);
 
         return Ok(new { user.Id, user.Email, user.UserName, user.IsActive, Roles = user.Roles.Select(role => role.Name) });
     }
@@ -152,6 +151,26 @@ public sealed class AdministrationController(IdentityDbContext dbContext, IPassw
         return NoContent();
     }
 
+    [HttpPost("users/{userId:guid}/send-password-reset")]
+    public async Task<IActionResult> SendPasswordReset(Guid userId, CancellationToken cancellationToken)
+    {
+        RequireUserManagement();
+        var user = await dbContext.Users.SingleOrDefaultAsync(item => item.Id == userId, cancellationToken);
+        if (user is null) return NotFound();
+
+        var nowUtc = DateTime.UtcNow;
+        var existingTokens = await dbContext.PasswordResetTokens
+            .Where(item => item.UserId == user.Id && item.UsedAtUtc == null && item.ExpiresAtUtc > nowUtc)
+            .ToListAsync(cancellationToken);
+        foreach (var token in existingTokens) token.Use(nowUtc);
+        var resetToken = PasswordResetTokenFactory.Create(user.Id);
+        dbContext.PasswordResetTokens.Add(resetToken.Token);
+        dbContext.AdministrationAuditEntries.Add(new AdministrationAuditEntry(ActorId(), userId, "PasswordResetSent", user.Email));
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await passwordResetEmailService.SendAsync(user.Email, user.UserName, resetToken.RawToken, false, cancellationToken);
+        return NoContent();
+    }
+
     [HttpDelete("users/{userId:guid}")]
     public async Task<IActionResult> DeleteUser(Guid userId, CancellationToken cancellationToken)
     {
@@ -190,5 +209,5 @@ public sealed class AdministrationController(IdentityDbContext dbContext, IPassw
 
 public sealed record UpdateUserRolesRequest(IReadOnlyCollection<Guid> RoleIds);
 public sealed record UpdateUserStatusRequest(bool IsActive);
-public sealed record CreateOperationalUserRequest(string Email, string UserName, string Password, IReadOnlyCollection<Guid> RoleIds);
+public sealed record CreateOperationalUserRequest(string Email, string UserName, IReadOnlyCollection<Guid> RoleIds);
 

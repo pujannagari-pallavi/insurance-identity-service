@@ -41,6 +41,8 @@ public sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> option
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
+    public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+
     public DbSet<AdministrationAuditEntry> AdministrationAuditEntries => Set<AdministrationAuditEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -51,6 +53,7 @@ public sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> option
         ConfigureRole(modelBuilder);
         ConfigurePermission(modelBuilder);
         ConfigureRefreshToken(modelBuilder);
+        ConfigurePasswordResetToken(modelBuilder);
         ConfigureAdministrationAuditEntry(modelBuilder);
         SeedIdentityData(modelBuilder);
     }
@@ -137,6 +140,20 @@ public sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> option
         builder.Property(token => token.CreatedAtUtc).IsRequired();
         builder.Property(token => token.ExpiresAtUtc).IsRequired();
         builder.HasIndex(token => token.Token).IsUnique();
+    }
+
+    private static void ConfigurePasswordResetToken(ModelBuilder modelBuilder)
+    {
+        var builder = modelBuilder.Entity<PasswordResetToken>();
+
+        builder.ToTable("PasswordResetTokens");
+        builder.HasKey(token => token.Id);
+        builder.Property(token => token.TokenHash).HasMaxLength(64).IsRequired();
+        builder.Property(token => token.CreatedAtUtc).IsRequired();
+        builder.Property(token => token.ExpiresAtUtc).IsRequired();
+        builder.HasIndex(token => token.TokenHash).IsUnique();
+        builder.HasIndex(token => token.UserId);
+        builder.HasOne<User>().WithMany().HasForeignKey(token => token.UserId).OnDelete(DeleteBehavior.Cascade);
     }
 
     private static void ConfigureAdministrationAuditEntry(ModelBuilder modelBuilder)

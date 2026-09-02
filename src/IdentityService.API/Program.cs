@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using IdentityService.API;
 using IdentityService.API.Infrastructure;
 using IdentityService.Application.Services;
 using IdentityService.Infrastructure;
@@ -48,6 +49,7 @@ builder.Services.AddSwaggerGen(options =>
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<IdentityExceptionHandler>();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddScoped<IPasswordResetEmailService, PasswordResetEmailService>();
 
 var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>()
     ?? throw new InvalidOperationException("JWT configuration is missing.");
